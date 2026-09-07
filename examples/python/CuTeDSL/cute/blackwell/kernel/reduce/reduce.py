@@ -81,7 +81,8 @@ Mbarrier Requirements (Cluster Reduction)
 -----------------------------------------
 For cluster reduction, the caller must:
 1. Allocate an mbarrier in shared memory
-2. Initialize it with `cute.arch.mbarrier_init(mbar_ptr, thread_count)`
+2. Initialize it with `cute.arch.mbarrier_init(mbar_ptr, 1)` -- a single
+   elected thread performs the one arrive (with expect-tx) per phase
 3. Pass the mbarrier pointer to `cluster_reduce()`
 
 The cluster_reduce function handles:
@@ -124,9 +125,9 @@ Usage Example
 
 References
 ----------
-The cluster reduction scheme (each warp pushing its partial result into every
-peer CTA's shared memory with ``st.async`` and tracking completion with an
-mbarrier) is inspired by Quack: https://github.com/Dao-AILab/quack
+The cluster reduction scheme (each warp pushing its partial result into the
+shared memory of every CTA in the cluster with ``st.async`` and tracking
+completion with an mbarrier) is inspired by Quack: https://github.com/Dao-AILab/quack
 """
 
 import operator
@@ -260,7 +261,7 @@ def cluster_reduce(
     4. Reduces across all collected values
 
     Args:
-        val: The warp-reduced value (only lane 0's value is used for stores)
+        val: The warp-reduced value (lanes 0..cluster_n-1 each store it to one CTA)
         op: Binary reduction operator, e.g., `operator.add` or `cute.arch.fmax`
         reduction_buffer: Shared memory tensor with hierarchical shape
                           (rows_per_block, (warps_per_row, cluster_n))
@@ -294,9 +295,10 @@ def cluster_reduce(
                 Float32
             )
 
-            # Initialize mbarrier (once per kernel)
+            # Initialize mbarrier (once per kernel); arrival count is 1 because
+            # a single elected thread does the arrive_and_expect_tx
             mbar = cute.make_smem_tensor(cute.make_layout((1,)), cute.arch.Mbarrier)
-            cute.arch.mbarrier_init(mbar.iterator, thread_count)
+            cute.arch.mbarrier_init(mbar.iterator, 1)
 
             # Perform cluster reduction
             result = cluster_reduce(
