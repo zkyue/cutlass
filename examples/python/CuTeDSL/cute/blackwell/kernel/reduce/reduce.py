@@ -295,10 +295,16 @@ def cluster_reduce(
                 Float32
             )
 
-            # Initialize mbarrier (once per kernel); arrival count is 1 because
-            # a single elected thread does the arrive_and_expect_tx
+            # Initialize mbarrier (once per kernel, by a single thread); the
+            # arrival count is 1 because one elected thread does the
+            # arrive_and_expect_tx. Fence the init and sync the cluster before
+            # any CTA may store into a peer's buffer / mbarrier.
             mbar = cute.make_smem_tensor(cute.make_layout((1,)), cute.arch.Mbarrier)
-            cute.arch.mbarrier_init(mbar.iterator, 1)
+            if cute.arch.thread_idx()[0] == 0:
+                cute.arch.mbarrier_init(mbar.iterator, 1)
+            cute.arch.mbarrier_init_fence()
+            cute.arch.cluster_arrive_relaxed()
+            cute.arch.cluster_wait()
 
             # Perform cluster reduction
             result = cluster_reduce(
